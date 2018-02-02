@@ -15,11 +15,12 @@ import sys
 from visdom import Visdom
 import cv2
 
-from Net.ssd_vgg.utils.data_read import CustomDataset
-from  Net.ssd_vgg.utils.visualize import get_img,show
-from  Net.ssd_vgg.ssd_vgg_base import SSD_Net,make_vgg_layers,make_ectra_layers,make_loc_conf_layers,cfg,box_cfg,extras_cfg
-from Net.ssd_vgg import loss as Loss
-from Net.ssd_vgg.utils.read_tmp import read_temperature
+
+from Net.ssd.utils.data_read import CustomDataset
+from  Net.ssd.utils.visualize import get_img,show
+from  Net.ssd.ssd_vgg.ssd_vgg_base import SSD_Net,make_vgg_layers,make_ectra_layers,make_loc_conf_layers,cfg,box_cfg,extras_cfg
+from Net.ssd.loss import loss as Loss
+from Net.ssd.utils.read_tmp import read_temperature
 
 
 
@@ -34,7 +35,7 @@ if __name__ =="__main__":
 
     Use_cuda = True
     Use_vis = True
-    save_mode_name = 'ssd_net.pth'
+    save_mode_name = './ssd_net.pth'
 
 
     # =============Set up the net==========================================
@@ -82,31 +83,36 @@ if __name__ =="__main__":
         COST=0
         COST_CNT=0
 
-        for item in data_loader['train']:
-            COST_CNT+=1
+        car_img_root='/home/jason/Dataset/CompCars/data/data/image/'
+        f=open('../data/test_car.txt','r')
+        car_list=f.readlines()
+        f.close()
+        car_list=[item.strip('\n') for item in car_list ]
 
-            imgs,indexs,img_names,flips = item
-            GTS=train_dataset.get_GT_boxs(indexs.numpy(),flips.numpy())
-            GTS=train_dataset.get_SSD_GTS(GTS)
+        import PIL
+        import time
 
-            if Use_cuda:
-                train_x = torch.autograd.Variable(imgs,volatile=True).cuda()
-            else:
-                train_x = torch.autograd.Variable(imgs,volatile=True)
+        test_trans = torchvision.transforms.Compose([
+            # torchvision.transforms.CenterCrop((224,224)),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+        ])
+        for i in range( car_list.__len__() ):
 
+            t1 = time.time()
+
+            car_img = PIL.Image.open(car_img_root+car_list[i])
+            car_img = car_img.resize((300,300),PIL.Image.ANTIALIAS)
+            car_img = test_trans(car_img)
+            car_img=car_img.unsqueeze(0)
+
+            train_x = torch.autograd.Variable(car_img,volatile=True).cuda()
             outputs = ssd_net(train_x)
-
-            loss = Loss.loss_for_batch(ssd_net.priors,
-                                       GTS=GTS,
-                                       outputs=outputs,
-                                       threshold=0.5,k=3,is_cuda=Use_cuda
-                                       )
 
             # [x1 y1 x2 y2] tensor  [8732,4] -> ndarray
             loc_boxs=Loss.decode(outputs[0][0].cpu().data, priors=ssd_net.priors.data, variances=[0.1, 0.2])
             loc_boxs=loc_boxs.numpy()
-
-
 
             # tensor [8732,2] -> ndarray
             conf_result = outputs[1][0]
@@ -122,8 +128,7 @@ if __name__ =="__main__":
             loc_boxs=loc_boxs[car_index]
             conf_result=conf_result[car_index]
 
-            img = get_img(imgs.numpy()[0])
-
+            img = get_img(car_img.numpy()[0])
 
             for i in range(loc_boxs.shape[0]):
                 pt=loc_boxs[i]*300
@@ -132,13 +137,65 @@ if __name__ =="__main__":
                               )
             cv2.imshow('img',img)
 
+            t2 = time.time()
+            print('time is: ',1000*(t2-t1),' ms')
+
             cv2.waitKey(0)
 
-            # print(index.sum())
-            #
-            # img = get_img(imgs.numpy()[0])
-            #
-            # cv2.imshow('img',img)
-            #
-            # cv2.waitKey(100)
-            # cv2.waitKey(0)
+
+
+
+
+
+        # for item in data_loader['train']:
+        #     COST_CNT+=1
+        #
+        #     imgs,indexs,img_names,flips = item
+        #     GTS=train_dataset.get_GT_boxs(indexs.numpy(),flips.numpy())
+        #     GTS=train_dataset.get_SSD_GTS(GTS)
+        #
+        #     if Use_cuda:
+        #         train_x = torch.autograd.Variable(imgs,volatile=True).cuda()
+        #     else:
+        #         train_x = torch.autograd.Variable(imgs,volatile=True)
+        #
+        #     outputs = ssd_net(train_x)
+        #
+        #     loss = Loss.loss_for_batch(ssd_net.priors,
+        #                                GTS=GTS,
+        #                                outputs=outputs,
+        #                                threshold=0.5,k=3,is_cuda=Use_cuda
+        #                                )
+        #
+        #     # [x1 y1 x2 y2] tensor  [8732,4] -> ndarray
+        #     loc_boxs=Loss.decode(outputs[0][0].cpu().data, priors=ssd_net.priors.data, variances=[0.1, 0.2])
+        #     loc_boxs=loc_boxs.numpy()
+        #
+        #
+        #
+        #     # tensor [8732,2] -> ndarray
+        #     conf_result = outputs[1][0]
+        #     conf_result = torch.nn.functional.softmax(conf_result,dim=1)
+        #     conf_result = conf_result.data.cpu().numpy()
+        #
+        #     print(loc_boxs.shape,conf_result.shape)
+        #
+        #     index = np.argmax(conf_result,axis=1)
+        #
+        #     car_index = index==1
+        #
+        #     loc_boxs=loc_boxs[car_index]
+        #     conf_result=conf_result[car_index]
+        #
+        #     img = get_img(imgs.numpy()[0])
+        #
+        #
+        #     for i in range(loc_boxs.shape[0]):
+        #         pt=loc_boxs[i]*300
+        #         cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
+        #                       thickness=2
+        #                       )
+        #     cv2.imshow('img',img)
+        #
+        #     cv2.waitKey(0)
+

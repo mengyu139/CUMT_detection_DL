@@ -48,7 +48,6 @@ class CustomDataset(torch.utils.data.Dataset):#需要继承data.Dataset
         self.img_size=img_size
         self.label_map=label_map
 
-
         if self.is_train :
             self.transform = train_trans
         else:

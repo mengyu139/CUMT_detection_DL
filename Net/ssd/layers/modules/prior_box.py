@@ -1,4 +1,4 @@
-from Net.ssd_vgg.data.config import v2
+from Net.ssd.data.config import v2
 import torch
 from math import sqrt as sqrt
 from itertools import product as product

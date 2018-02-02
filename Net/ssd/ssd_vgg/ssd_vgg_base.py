@@ -16,12 +16,12 @@ import math
 import numpy as np
 import sys
 
-from Net.ssd_vgg.data.config import v2
-from Net.ssd_vgg.prior_box import PriorBox
+from Net.ssd.data.config import v2
+from Net.ssd.layers.modules.prior_box import PriorBox
 
 sys.path.append('/home/jason/PycharmProjects/CUMT_YOLO/Net/ssd_vgg')
 
-from Net.ssd_vgg.layers.modules.l2norm import L2Norm
+from Net.ssd.layers.modules.l2norm import L2Norm
 
 
 class SSD_Net(nn.Module):

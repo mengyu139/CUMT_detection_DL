@@ -13,8 +13,8 @@ import math
 import numpy as np
 import sys
 
-from Net.ssd_vgg.utils.data_read import CustomDataset
-from  Net.ssd_vgg.utils.visualize import get_img,show
+from Net.ssd.utils.data_read import CustomDataset
+from  Net.ssd.utils.visualize import get_img,show
 
 # box_a box_b ndarray [num,4]  [x1 y1 x2 y2]
 def intersect(box_a, box_b):

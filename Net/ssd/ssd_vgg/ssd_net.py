@@ -17,7 +17,7 @@ from visdom import Visdom
 from Net.ssd_vgg.utils.data_read import CustomDataset
 from  Net.ssd_vgg.utils.visualize import get_img,show
 from  Net.ssd_vgg.ssd_vgg_base import SSD_Net,make_vgg_layers,make_ectra_layers,make_loc_conf_layers,cfg,box_cfg,extras_cfg
-from Net.ssd_vgg import loss as Loss
+from Net.ssd_vgg.loss import loss as Loss
 from Net.ssd_vgg.utils.read_tmp import read_temperature
 
 
