@@ -71,5 +71,5 @@ def show(img,gts):
 
 
     cv2.imshow('img',img)
-    cv2.waitKey(1000)
+    cv2.waitKey(0)
         #
