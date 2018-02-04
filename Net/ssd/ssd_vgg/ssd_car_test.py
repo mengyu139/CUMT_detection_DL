@@ -26,12 +26,12 @@ if __name__ =="__main__":
 
     # =============Set up the configuration==========================================
     train_img_root='/home/jason/Dataset/CompCars/data/data/image/'
-    train_btach_size=16
+    train_btach_size=1
 
     num_classes=2#  background:0  car:1
 
     Use_cuda = True
-    Use_vis = True
+    Use_vis = False
     save_mode_name = 'ssd_cumt_car.pth'
 
     # =============Set up the net==========================================
@@ -58,18 +58,18 @@ if __name__ =="__main__":
     #
     # ssd_net.load_state_dict(state_dict)
     # =============Set the optimizer==========================================
-    k=0.0001
-    optimizer = torch.optim.SGD ([
-        # {'params':train_para ,'lr':0.001},
-        {'params':ssd_net.vgg.parameters(),'lr':k},
-        {'params':ssd_net.extras.parameters(),'lr':k},
-        {'params':ssd_net.loc.parameters(),'lr':k},
-        {'params':ssd_net.conf.parameters(),'lr':k},
-    ],weight_decay=0.0,momentum=0.9)
+    # k=0.0001
+    # optimizer = torch.optim.SGD ([
+    #     # {'params':train_para ,'lr':0.001},
+    #     {'params':ssd_net.vgg.parameters(),'lr':k},
+    #     {'params':ssd_net.extras.parameters(),'lr':k},
+    #     {'params':ssd_net.loc.parameters(),'lr':k},
+    #     {'params':ssd_net.conf.parameters(),'lr':k},
+    # ],weight_decay=0.0,momentum=0.9)
 
     # =============Set the data loader==========================================
-    train_dataset = CustomDataset(train_img_root,txt_path='/home/jason/PycharmProjects/CUMT_YOLO/Net/ssd/data/car_train.txt',
-                                        is_train=True,
+    train_dataset = CustomDataset(train_img_root,txt_path='/home/jason/PycharmProjects/CUMT_YOLO/Net/ssd/data/car_test.txt',
+                                        is_train=False,
                                         img_size=300)
     # test_dataset = data_read.CustomDataset(img_root,txt_path='new_26_data_test.txt',is_train=False,label_map_txt='26_label.txt')
     data_loader={}
@@ -112,20 +112,13 @@ if __name__ =="__main__":
 
     for epoch in range(1000):
 
-        GPU_TEM = read_temperature()
-        print ('+++++++++++++++++++++++++++++++++++++gpu tem :',GPU_TEM)
-        if GPU_TEM > 80:
-            print ('GPU OVER HEATED,QUIT!!!')
-            break
-
-
-        ssd_net.train()
+        ssd_net.eval()
 
         COST=0
         COST_CNT=0
 
         for item in data_loader['train']:
-            dis_cnt+=1
+            # dis_cnt+=1
             COST_CNT+=1
 
             imgs,indexs,img_names,flips = item
@@ -140,34 +133,70 @@ if __name__ =="__main__":
 
 
             if Use_cuda:
-                train_x = torch.autograd.Variable(imgs).cuda()
+                train_x = torch.autograd.Variable(imgs,volatile=True).cuda()
             else:
-                train_x = torch.autograd.Variable(imgs)
+                train_x = torch.autograd.Variable(imgs,volatile=True)
 
             outputs = ssd_net(train_x)
 
-            optimizer.zero_grad()
 
 
-            loss = Loss.loss_for_batch(ssd_net.priors,
-                                       GTS=GTS,
-                                       outputs=outputs,
-                                       threshold=0.5,k=3,is_cuda=Use_cuda
-                                       )
+            # loss = Loss.loss_for_batch(ssd_net.priors,
+            #                            GTS=GTS,
+            #                            outputs=outputs,
+            #                            threshold=0.5,k=3,is_cuda=Use_cuda
+            #                            )
 
-            loss.backward()
-            optimizer.step()
-            sys.stdout.write('.')
-            sys.stdout.flush()
 
             # print(loss.cpu().data.numpy()[0] , loss.requires_grad)
 
-            if Use_vis:
-                viz.line(
-                X=np.array([dis_cnt]),
-                Y=np.array( [loss.cpu().data.numpy()[0]] ), win=Vis_loss, update='append')
+            # if Use_vis:
+            #     viz.line(
+            #     X=np.array([dis_cnt]),
+            #     Y=np.array( [loss.cpu().data.numpy()[0]] ), win=Vis_loss, update='append')
+            #
+            # COST+=loss.cpu().data.numpy()[0]
 
-            COST+=loss.cpu().data.numpy()[0]
+            # [x1 y1 x2 y2] tensor  [8732,4] -> ndarray
+            loc_boxs=Loss.decode(outputs[0][0].cpu().data, priors=ssd_net.priors.data, variances=[0.1, 0.2])
+            loc_boxs=loc_boxs.numpy()
+
+            conf_result = outputs[1][0]
+            conf_result = torch.nn.functional.softmax(conf_result,dim=1)
+            conf_result = conf_result.data.cpu().numpy()
+
+            print(loc_boxs.shape,conf_result.shape)
+
+            index = np.argmax(conf_result,axis=1)
+
+
+            car_index = index==1
+
+            print('origin loc_boxs,conf_result size: ',loc_boxs.shape,conf_result.shape)
+
+            print('choosed num: ',car_index.sum())
+
+            loc_boxs=loc_boxs[car_index]
+            conf_result=conf_result[car_index]
+
+            print('choosed loc_boxs,conf_result size: ',loc_boxs.shape,conf_result.shape)
+
+            print(conf_result)
+
+            max_index=np.argmax(conf_result[:,1])
+
+            img = get_img(imgs.numpy()[0])
+            pt=loc_boxs[max_index]*300
+            cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
+                          thickness=2
+            )
+            # for i in range(loc_boxs.shape[0]):
+            #     pt=loc_boxs[i]*300
+            #     cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
+            #                   thickness=2
+            #                   )
+            cv2.imshow('img',img)
+            cv2.waitKey(0)
 
         print('\nloss for one epoch :',COST/1./COST_CNT)
 
@@ -175,8 +204,3 @@ if __name__ =="__main__":
             viz.line(
                 X=np.array([epoch]),
                 Y=np.array( [COST] ), win=Vis_epoch_loss, update='append')
-
-
-        if epoch % 10 == 0:
-            torch.save(ssd_net.state_dict(),save_mode_name)
-            print('\n----------------------save modle in ',save_mode_name )

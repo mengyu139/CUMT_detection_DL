@@ -8,25 +8,24 @@ def calc(x):
     print('calc x*x= : ',str(int(x)*int(x)))
     # return x
 
-a=[[1,2],[1,2],[3,4],[7,6]]
-
-a=np.array(a)
-
-x=np.argmax(a,axis=1)
-
-y =x==1
-
-b=a[y]
-
-print(b)
 
 
+def softmax(a,index):
 
-a
-s
-for i in range(10):
-    s+= a*a
+    z=np.exp(a)
+    r=np.exp(a[index])/z.sum()
+    return r
 
+
+a=np.ones([5,2])
+
+
+b=np.array([0,0,1,0,0])
+
+c=b==1
+print(c,type(c))
+
+print(a[c])
 
 #
 #
