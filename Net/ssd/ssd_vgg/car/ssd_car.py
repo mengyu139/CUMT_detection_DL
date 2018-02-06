@@ -17,7 +17,7 @@ from visdom import Visdom
 
 from Net.ssd.utils.car_data_reader import CustomDataset
 from  Net.ssd.utils.visualize import get_img,show
-from  Net.ssd.ssd_vgg.ssd_vgg_base import SSD_Net,make_vgg_layers,make_ectra_layers,make_loc_conf_layers,cfg,box_cfg,extras_cfg
+from  Net.ssd.ssd_vgg.car.car_base import SSD_Net,make_vgg_layers,make_ectra_layers,make_loc_conf_layers,cfg,box_cfg,extras_cfg
 from Net.ssd.loss import loss as Loss
 from Net.ssd.utils.read_tmp import read_temperature
 
@@ -32,7 +32,7 @@ if __name__ =="__main__":
 
     Use_cuda = True
     Use_vis = True
-    save_mode_name = 'ssd_cumt_car.pth'
+    save_mode_name = 'ssd_cumt_car_fg.pth'
 
     # =============Set up the net==========================================
     vgg_layers = make_vgg_layers(cfg['D'],batch_norm=False)
@@ -44,27 +44,34 @@ if __name__ =="__main__":
 
     # =============Load the parameters==========================================
 
-    save_dict = torch.load( save_mode_name )
-    ssd_net.load_state_dict(save_dict)
-
-    # save_dict=torch.load('/home/jason/PycharmProjects/CUMT_YOLO/Model/vgg16-397923af.pth')
+    # save_dict = torch.load( save_mode_name )
     # state_dict=ssd_net.state_dict()
     # for key in save_dict:
-    #     if 'features.' in key:
-    #         target_key = 'vgg.'+key.lstrip('features.')
-    #         print(target_key)
-    #
-    #         state_dict[target_key]=save_dict[key]
-    #
+    #     state_dict[key]=save_dict[key]
     # ssd_net.load_state_dict(state_dict)
+
+    save_dict=torch.load('/home/jason/PycharmProjects/CUMT_YOLO/Model/vgg16-397923af.pth')
+    state_dict=ssd_net.state_dict()
+    for key in save_dict:
+        if 'features.' in key:
+            target_key = 'vgg.'+key.lstrip('features.')
+            print(target_key)
+
+            state_dict[target_key]=save_dict[key]
+
+    ssd_net.load_state_dict(state_dict)
     # =============Set the optimizer==========================================
-    k=0.0001
+    k=0.0003
     optimizer = torch.optim.SGD ([
         # {'params':train_para ,'lr':0.001},
         {'params':ssd_net.vgg.parameters(),'lr':k},
+
         {'params':ssd_net.extras.parameters(),'lr':k},
         {'params':ssd_net.loc.parameters(),'lr':k},
         {'params':ssd_net.conf.parameters(),'lr':k},
+
+        {'params':ssd_net.fg_conv.parameters(),'lr':100*k},
+        {'params':ssd_net.fg_classifier.parameters(),'lr':100*k}
     ],weight_decay=0.0,momentum=0.9)
 
     # =============Set the data loader==========================================
@@ -83,16 +90,27 @@ if __name__ =="__main__":
     if Use_vis:
         viz = Visdom()
         # line updates
-        Vis_loss = viz.line(
+        Vis_loss1 = viz.line(
             X=np.array([0]),
             Y=np.array([0]),
              opts=dict(
                     xlabel='step',
-                    ylabel='Loss',
-                    title='step SSD Training Loss',
+                    ylabel='Loss1',
+                    title='step SSD Training Loss1',
                     # legend=['Loc Loss', 'Conf Loss', 'Loss']
                 )
         )
+        Vis_loss2 = viz.line(
+            X=np.array([0]),
+            Y=np.array([0]),
+             opts=dict(
+                    xlabel='step',
+                    ylabel='Loss2',
+                    title='step SSD Training Loss2',
+                    # legend=['Loc Loss', 'Conf Loss', 'Loss']
+                )
+        )
+
         Vis_epoch_loss = viz.line(
             X=np.array([0]),
             Y=np.array([0]),
@@ -103,7 +121,7 @@ if __name__ =="__main__":
                     # legend=['Loc Loss', 'Conf Loss', 'Loss']
                 )
         )
-        dis_cnt=0
+    dis_cnt=0
      # =============Start the train==========================================
     if Use_cuda:
         ssd_net.cuda()
@@ -138,7 +156,6 @@ if __name__ =="__main__":
             #
             # cv2.waitKey(0)
 
-
             if Use_cuda:
                 train_x = torch.autograd.Variable(imgs).cuda()
             else:
@@ -149,11 +166,15 @@ if __name__ =="__main__":
             optimizer.zero_grad()
 
 
-            loss = Loss.loss_for_batch(ssd_net.priors,
+            loss1 = Loss.loss_for_batch(ssd_net.priors,
                                        GTS=GTS,
                                        outputs=outputs,
                                        threshold=0.5,k=3,is_cuda=Use_cuda
                                        )
+            loss2=Loss.loss_for_fg(GTS=GTS,
+                                   outputs=outputs,
+                                   threshold=0.8)
+            loss=loss1+loss2
 
             loss.backward()
             optimizer.step()
@@ -165,7 +186,12 @@ if __name__ =="__main__":
             if Use_vis:
                 viz.line(
                 X=np.array([dis_cnt]),
-                Y=np.array( [loss.cpu().data.numpy()[0]] ), win=Vis_loss, update='append')
+                Y=np.array( [loss1.cpu().data.numpy()[0]] ), win=Vis_loss1, update='append')
+
+                viz.line(
+                X=np.array([dis_cnt]),
+                Y=np.array( [loss2.cpu().data.numpy()[0]] ), win=Vis_loss2, update='append')
+
 
             COST+=loss.cpu().data.numpy()[0]
 

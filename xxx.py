@@ -2,7 +2,7 @@ import torch
 import fire
 import numpy as np
 import torch.autograd
-
+import torch.nn.functional
 
 def calc(x):
     print('calc x*x= : ',str(int(x)*int(x)))
@@ -17,43 +17,19 @@ def softmax(a,index):
     return r
 
 
-a=np.ones([5,2])
 
 
-b=np.array([0,0,1,0,0])
+a=torch.autograd.Variable(torch.FloatTensor())
 
-c=b==1
-print(c,type(c))
+b=a>1
 
-print(a[c])
+print(b,)
 
-#
-#
-# #
-# print(mask)
-# print(mask.size())
-#
-# mask = mask.unsqueeze(1)
-#
-# print(mask.size())
-#
-# mask=mask.expand_as(a)
-# print(mask.size())
-#
-# print(mask.float())
-# # pos = a[pos_index]
-# #
-# # print(pos)
 
-# a=torch.randn(8732, 4)
-# a = torch.autograd.Variable(a)
+# a=[[1,2,3],[1,2,3],[1,2,3]]
+# b=[1,1,1]
+# a=torch.autograd.Variable(torch.FloatTensor(a))
+# b=torch.autograd.Variable(torch.LongTensor(b))
 #
-# b=torch.ones(8732)
-# b=b.type(torch.LongTensor)
-# b = torch.autograd.Variable(b)
-#
-# conf_cost=torch.nn.functional.cross_entropy(input=a,target=b,size_average=False,reduce=False)
-# conf_cost = conf_cost.data.numpy()
-#
-#
-# print(conf_cost.size())
+# s = torch.nn.functional.cross_entropy(input=a,target=b,reduce=False,size_average=True)
+# print(s)

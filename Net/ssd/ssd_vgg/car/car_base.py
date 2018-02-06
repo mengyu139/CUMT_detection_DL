@@ -18,10 +18,86 @@ import sys
 
 from Net.ssd.data.config import v2
 from Net.ssd.layers.modules.prior_box import PriorBox
+import Net.ssd.loss.loss as Loss
 
 sys.path.append('/home/jason/PycharmProjects/CUMT_YOLO/Net/ssd_vgg')
 
 from Net.ssd.layers.modules.l2norm import L2Norm
+
+
+# out_locs:[b,8732,4] Variable
+# out_confs:[b,8732,num_classes=2] Variable
+# priors : [8732,4] Variable
+# Return-> boxes array [b,4]  [x1 y1 x2 y2] 0.0~1.0  valid [b]
+def get_best_prior_box(out_locs,out_confs,priors):
+
+    result_boxs=np.zeros([out_locs.size(0),4])
+    valid=[]
+
+    for i in range(out_locs.size(0)):
+        loc_boxs=Loss.decode(out_locs[i].cpu().data, priors=priors.cpu().data, variances=[0.1, 0.2])
+        loc_boxs=loc_boxs.numpy()
+
+        conf_result = torch.nn.functional.softmax(out_confs[i],dim=1)
+        conf_result = conf_result.data.cpu().numpy()
+
+        index = np.argmax(conf_result,axis=1)
+
+        car_index = index==1
+
+        if car_index.sum()==0:
+            valid.append(0)
+            continue
+
+        loc_boxs=loc_boxs[car_index]
+        conf_result=conf_result[car_index]
+
+        max_index=np.argmax(conf_result[:,1])
+
+        result_boxs[i,...]=loc_boxs[max_index,...]
+
+        if loc_boxs[max_index,2]>loc_boxs[max_index,0] and loc_boxs[max_index,3]>loc_boxs[max_index,1]:
+            valid.append(1)
+        else:
+            valid.append(0)
+
+    result_boxs=np.clip(result_boxs,a_max=1.0,a_min=0)
+    return result_boxs,valid
+
+
+# input_features:[b,512,19,19]      Variable
+
+# best_boxs[0] array [b,4]
+# best_boxs[1] list [b]
+
+# index:  number
+# extracted_features :[b,512,1,1]   Variable
+def extract_features(input_features,best_boxs,index,extracted_features,img_size=300):
+
+    box=best_boxs[0][index]
+    valid=best_boxs[1][index]
+
+    if valid == 0:
+        return
+    else:
+
+        ceil_num=input_features.size(2)
+
+        step=img_size/1./ceil_num
+        box=box*img_size
+        box=np.clip(box,a_max=img_size,a_min=0)
+
+        box=box/1./step
+        box=np.clip(box,a_min=0,a_max=ceil_num-1)
+        box=np.floor(box)
+        box=box.astype(np.int)# grid [0~19-1]
+
+        m=input_features[index][:,box[1]:box[3]+1,box[0]:box[2]+1]
+        m=torch.max(m,dim=1, keepdim=True)[0]
+        m=torch.max(m,dim=2, keepdim=True)[0]
+
+        extracted_features[index,...]=m[...]
+
 
 
 class SSD_Net(nn.Module):
@@ -48,46 +124,52 @@ class SSD_Net(nn.Module):
 
         self.fg_classes=fg_classes
 
-        # for m in self.modules():
-        #     print(type(m),m.__class__.__name__)
 
+        self.fg_conv=nn.Sequential(
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2,stride=2,padding=0),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+        )
+        self.fg_classifier=nn.Sequential(
+            nn.Linear(512, 4096),
+            nn.ReLU(True),
+            nn.Dropout(0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Dropout(0.5),
+            nn.Linear(4096, self.fg_classes),
+        )
         self._initialize_weights()
 
-        # for index,item in enumerate(self.vgg) :
-            # print(index," : " ,item.__class__.__name__ )
-
-        # print('self.loc: ',self.loc.__len__())
-
-        # self.fg_classifier=nn.Sequential(
-        #
-        #     nn.Linear(512, 1024),
-        #     nn.ReLU(True),
-        #     nn.Dropout(0.5),
-        #     nn.Linear(1024, 1024),
-        #     nn.ReLU(True),
-        #     nn.Dropout(0.5),
-        #     nn.Linear(1024, self.fg_classes),
-        # )
 
     def forward(self, x):
 
         sources=[]
 
-        # vgg conv 4_3
+        # vgg conv 4_3 [38]
         for k in range(23):
             x = self.vgg[k](x)
-
+            FG_conv_feature=x
 
         s = self.L2Norm(x)
+
+
         # vgg conv 4_3
         sources.append(s)
         for k in range(23, len(self.vgg)):
             x = self.vgg[k](x)
             # print('k: ',k)
-            if k == 29:
-                conv_feature=x
+            # if k == 29:
+            #     FG_conv_feature=x
                 # print('conv_feature size: ',conv_feature.size())
-
 
         # vgg fc7->cov7
         sources.append(x)
@@ -106,14 +188,35 @@ class SSD_Net(nn.Module):
 
         # [b,xxx]
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
+        loc=loc.view(loc.size(0), -1, 4)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf],1)
+        conf=conf.view(conf.size(0), -1, self.num_classes)
+
+        # ----------FG---------------
+        FG_conv_feature=self.fg_conv(FG_conv_feature)
+        Extracted_features=torch.autograd.Variable(torch.zeros((loc.size(0),512,1,1))).cuda()
+        best_prior=get_best_prior_box(loc,conf,self.priors)
+
+        for index in range(loc.size(0)):
+            extract_features(FG_conv_feature,best_prior,index=index,extracted_features=Extracted_features,img_size=300)
+
+        Extracted_features=Extracted_features.view(Extracted_features.size(0),-1)
+
+        # print('extract_features size: ',Extracted_features.size())
+
+        fg_cls=self.fg_classifier(Extracted_features)
+
+        # =========================
 
         output = (
-                    loc.view(loc.size(0), -1, 4),
-                    conf.view(conf.size(0), -1, self.num_classes),
-                    conv_feature
+                    loc,
+                    conf,
+                    # loc.view(loc.size(0), -1, 4),
+                    # conf.view(conf.size(0), -1, self.num_classes),
+                    # FG_conv_feature,
+                    fg_cls,
+                    best_prior # []
             )
-
         return output
 
 
@@ -195,8 +298,6 @@ def make_loc_conf_layers(input_features_list,box_cfg,num_classes=1+1):
 
 
 
-
-
 box_cfg=[4,6,6,6,4,4]
 cfg = {
     'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
@@ -213,8 +314,6 @@ extras_cfg = {
 
 
 
-
-
 if __name__=="__main__":
 
 
@@ -224,7 +323,7 @@ if __name__=="__main__":
     head = make_loc_conf_layers(input_features_list=[512,1024,512,256,256,256],box_cfg=box_cfg,num_classes=2)
 
     net = SSD_Net(vgg_layers,extras=extra_layers,head=head,num_classes=2)
-
+    net.cuda()
 
     # state_dict = net.state_dict()
     #
@@ -240,12 +339,12 @@ if __name__=="__main__":
     #     print(cnt,' ',key)
     #
     #
-    data=torch.autograd.Variable(torch.FloatTensor(1,3,300,300))
+    data=torch.autograd.Variable(torch.FloatTensor(1,3,300,300)).cuda()
 
     out = net(data)
 
     print('out size',out[2].size())
-
+    print('fg cls size',out[3].size())
 
     # for item in out:
     #     print(item.size())

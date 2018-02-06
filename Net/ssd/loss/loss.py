@@ -15,6 +15,8 @@ import sys
 
 from Net.ssd.utils.data_read import CustomDataset
 from  Net.ssd.utils.visualize import get_img,show
+from  Net.ssd.utils.visualize import IOU
+
 
 # box_a box_b ndarray [num,4]  [x1 y1 x2 y2]
 def intersect(box_a, box_b):
@@ -237,7 +239,69 @@ def loss_for_batch(priors,GTS,outputs,threshold=0.5,k=3,is_cuda=False):
         loss1,loss2=loss_for_one_img(priors,GT,[outputs[0][i],outputs[1][i]],threshold,k,is_cuda)
         Loss[i]=loss1+loss2
 
+    # =========FG loss===========================
+    # fg_label=[item[0][5] for item in GTS]
+    # fg_label=torch.autograd.Variable(torch.LongTensor(fg_label)).cuda()
+    #
+    # fg_loss=torch.nn.functional.cross_entropy(input=outputs[2],
+    #                                           target=fg_label,
+    #                                           reduce=False
+    #                                           )
+    # fg_loss=fg_loss*fg_mask.float().sum()/fg_mask.sum()
+    # =========FG loss===========================
+
+
     return Loss.mean()
+
+
+def loss_for_fg(GTS,outputs,threshold=0.8):
+
+    batch_num = outputs[3][1].__len__()
+
+    mask1=torch.FloatTensor(outputs[3][1])
+    mask2=torch.zeros([batch_num])
+
+    for i in range(batch_num):
+        gt=GTS[i][0][0:4]
+        gt_box=np.array([0,0,0,0],dtype=np.float)
+        gt_box[0]=gt[0]-0.5*gt[2]
+        gt_box[1]=gt[1]-0.5*gt[3]
+        gt_box[2]=gt[0]+0.5*gt[2]
+        gt_box[3]=gt[1]+0.5*gt[3]
+
+        out_box=outputs[3][0][i]
+
+        iou_value=IOU(out_box,gt_box)
+        if iou_value > threshold:
+            mask2[i]=1
+
+    mask=mask1*mask2
+    mask=torch.autograd.Variable(mask).cuda()
+
+
+#     ------------------------
+
+    fg_label=[item[0][5] for item in GTS]
+    fg_label=torch.autograd.Variable(torch.LongTensor(fg_label)).cuda()
+
+    # print( 'fg_loss input:',outputs[2].size(),'target: ',fg_label.size() )
+
+    fg_loss=torch.nn.functional.cross_entropy(input=outputs[2],
+                                      target=fg_label,
+                                      reduce=False
+                                      )
+    fg_loss=fg_loss*mask
+
+    # print('torch.sum(mask): ',torch.sum(mask))
+    if torch.sum(mask).cpu().data.numpy()[0] == 0:
+        fg_loss=torch.autograd.Variable(torch.FloatTensor([0])).cuda()
+    else:
+        fg_loss=fg_loss.sum()/mask.sum()
+
+    # print('fg_loss: ',fg_loss)
+
+    return fg_loss
+
 
 
 
