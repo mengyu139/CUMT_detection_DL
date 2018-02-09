@@ -8,6 +8,8 @@ import torch.optim
 import torchvision
 import torch.utils.data
 import torchvision.transforms
+import torch.backends.cudnn
+import time
 
 import math
 import numpy as np
@@ -26,7 +28,7 @@ if __name__ =="__main__":
 
     # =============Set up the configuration==========================================
     train_img_root='/home/jason/Dataset/CompCars/data/data/image/'
-    train_btach_size=16
+    train_btach_size=24
 
     num_classes=2#  background:0  car:1
 
@@ -44,34 +46,37 @@ if __name__ =="__main__":
 
     # =============Load the parameters==========================================
 
-    # save_dict = torch.load( save_mode_name )
+    # state_dict=ssd_net.state_dict()
+    #
+    # for key in state_dict:
+    #     print(key)
+
+    save_dict = torch.load( save_mode_name )
+    ssd_net.load_state_dict(save_dict)
+
+    # save_dict=torch.load('/home/jason/PycharmProjects/CUMT_YOLO/Model/vgg16-397923af.pth')
     # state_dict=ssd_net.state_dict()
     # for key in save_dict:
-    #     state_dict[key]=save_dict[key]
+    #     if 'features.' in key:
+    #         target_key = 'vgg.'+key.lstrip('features.')
+    #         print(key,' -> ',target_key)
+    #
+    #         state_dict[target_key]=save_dict[key]
+    #
     # ssd_net.load_state_dict(state_dict)
-
-    save_dict=torch.load('/home/jason/PycharmProjects/CUMT_YOLO/Model/vgg16-397923af.pth')
-    state_dict=ssd_net.state_dict()
-    for key in save_dict:
-        if 'features.' in key:
-            target_key = 'vgg.'+key.lstrip('features.')
-            print(target_key)
-
-            state_dict[target_key]=save_dict[key]
-
-    ssd_net.load_state_dict(state_dict)
     # =============Set the optimizer==========================================
-    k=0.0003
+    k=0.0001
     optimizer = torch.optim.SGD ([
         # {'params':train_para ,'lr':0.001},
         {'params':ssd_net.vgg.parameters(),'lr':k},
 
         {'params':ssd_net.extras.parameters(),'lr':k},
+        {'params':ssd_net.L2Norm.parameters(),'lr':k},
         {'params':ssd_net.loc.parameters(),'lr':k},
         {'params':ssd_net.conf.parameters(),'lr':k},
 
-        {'params':ssd_net.fg_conv.parameters(),'lr':100*k},
-        {'params':ssd_net.fg_classifier.parameters(),'lr':100*k}
+        {'params':ssd_net.fg_conv.parameters(),'lr':3*k,'weight_decay':0.0005},
+        {'params':ssd_net.fg_classifier.parameters(),'lr':3*k,'weight_decay':0.0005}
     ],weight_decay=0.0,momentum=0.9)
 
     # =============Set the data loader==========================================
@@ -83,7 +88,7 @@ if __name__ =="__main__":
     data_loader["train"]=torch.utils.data.DataLoader(train_dataset,
                                                      batch_size=train_btach_size,
                                                      shuffle=True,
-                                                     num_workers=8)
+                                                     num_workers=4)
     # data_loader["test"]=torch.utils.data.DataLoader(test_dataset, batch_size=test_btach_size,shuffle=False, num_workers=8)
 
     # =============Set the visdom==========================================
@@ -125,6 +130,7 @@ if __name__ =="__main__":
      # =============Start the train==========================================
     if Use_cuda:
         ssd_net.cuda()
+        torch.backends.cudnn.benchmark=False
     else:
         ssd_net.cpu()
 
@@ -141,7 +147,7 @@ if __name__ =="__main__":
 
         COST=0
         COST_CNT=0
-
+        time1=time.time()
         for item in data_loader['train']:
             dis_cnt+=1
             COST_CNT+=1
@@ -192,10 +198,11 @@ if __name__ =="__main__":
                 X=np.array([dis_cnt]),
                 Y=np.array( [loss2.cpu().data.numpy()[0]] ), win=Vis_loss2, update='append')
 
-
             COST+=loss.cpu().data.numpy()[0]
 
-        print('\nloss for one epoch :',COST/1./COST_CNT)
+        time2=time.time()
+
+        print('\nloss for one epoch :',COST/1./COST_CNT,' time: ',time2-time1,' s ')
 
         if Use_vis:
             viz.line(
@@ -203,6 +210,6 @@ if __name__ =="__main__":
                 Y=np.array( [COST] ), win=Vis_epoch_loss, update='append')
 
 
-        if epoch % 10 == 0:
+        if epoch % 50 == 0:
             torch.save(ssd_net.state_dict(),save_mode_name)
             print('\n----------------------save modle in ',save_mode_name )

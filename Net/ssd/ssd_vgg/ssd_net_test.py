@@ -14,13 +14,15 @@ import numpy as np
 import sys
 from visdom import Visdom
 import cv2
-
+import pickle
 
 from Net.ssd.utils.data_read import CustomDataset
-from  Net.ssd.utils.visualize import get_img,show
+from  Net.ssd.utils.visualize import get_img,show,nms,eval_img
 from  Net.ssd.ssd_vgg.ssd_vgg_base import SSD_Net,make_vgg_layers,make_ectra_layers,make_loc_conf_layers,cfg,box_cfg,extras_cfg
 from Net.ssd.loss import loss as Loss
 from Net.ssd.utils.read_tmp import read_temperature
+
+
 
 
 
@@ -34,7 +36,8 @@ if __name__ =="__main__":
     num_classes=2#  background:0  car:1
 
     Use_cuda = True
-    Use_vis = True
+    Use_vis = False
+    Use_imshow=True
     save_mode_name = './ssd_net.pth'
 
 
@@ -58,7 +61,7 @@ if __name__ =="__main__":
     data_loader={}
     data_loader["train"]=torch.utils.data.DataLoader(train_dataset,
                                                      batch_size=train_btach_size,
-                                                     shuffle=True,
+                                                     shuffle=False ,
                                                      num_workers=8)
     # data_loader["test"]=torch.utils.data.DataLoader(test_dataset, batch_size=test_btach_size,shuffle=False, num_workers=8)
 
@@ -69,7 +72,7 @@ if __name__ =="__main__":
     else:
         ssd_net.cpu()
 
-    for epoch in range(1000):
+    for epoch in range(1):
 
         GPU_TEM = read_temperature()
         print ('+++++++++++++++++++++++++++++++++++++gpu tem :',GPU_TEM)
@@ -83,29 +86,19 @@ if __name__ =="__main__":
         COST=0
         COST_CNT=0
 
-        car_img_root='/home/jason/Dataset/CompCars/data/data/image/'
-        f=open('../data/test_car.txt','r')
-        car_list=f.readlines()
-        f.close()
-        car_list=[item.strip('\n') for item in car_list ]
+        TP=0
+        FP=0
+        FN=0
 
-        import PIL
-        import time
+        s_1=[]
+        s_2=[]
+        s_pickle=open('save.pickle','wb')
 
-        test_trans = torchvision.transforms.Compose([
-            # torchvision.transforms.CenterCrop((224,224)),
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-        ])
-        for i in range( car_list.__len__() ):
+        for item in data_loader['train']:
 
-            t1 = time.time()
-
-            car_img = PIL.Image.open(car_img_root+car_list[i])
-            car_img = car_img.resize((300,300),PIL.Image.ANTIALIAS)
-            car_img = test_trans(car_img)
-            car_img=car_img.unsqueeze(0)
+            car_img,indexs,img_names,flips = item
+            Ori_GTS=train_dataset.get_GT_boxs(indexs.numpy(),flips.numpy())
+            GTS=train_dataset.get_SSD_GTS(Ori_GTS)
 
             train_x = torch.autograd.Variable(car_img,volatile=True).cuda()
             outputs = ssd_net(train_x)
@@ -126,22 +119,45 @@ if __name__ =="__main__":
             car_index = index==1
 
             loc_boxs=loc_boxs[car_index]
-            conf_result=conf_result[car_index]
+            conf_result=conf_result[car_index][:,1:2]
 
-            img = get_img(car_img.numpy()[0])
+            # print('loc_boxs size: ',loc_boxs.shape,' conf_result size: ',conf_result.shape)
 
-            for i in range(loc_boxs.shape[0]):
-                pt=loc_boxs[i]*300
-                cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
-                              thickness=2
-                              )
-            cv2.imshow('img',img)
+            result=np.concatenate((loc_boxs,conf_result),axis=1)
 
-            t2 = time.time()
-            print('time is: ',1000*(t2-t1),' ms')
+            result=nms(result,threshold=0.5)
 
-            cv2.waitKey(0)
+            s_1.append(result)
+            s_2.append(Ori_GTS[0])
 
+
+            # tp,fp,fn=eval_img(result=result,gt=np.array(Ori_GTS[0]),threshold=0.5)
+            #
+            # print("tp is %d ,fp is %d ,fn is %d gt is %d " %(tp,fp,fn,Ori_GTS[0].__len__()))
+            #
+            #
+            if Use_imshow:
+                img = get_img(car_img.numpy()[0])
+                if result is not None:
+                    for i in range(result.shape[0]):
+                        pt=result[i]*300
+                        cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
+                                      thickness=2
+                                      )
+
+                gt_box=np.array(Ori_GTS[0])
+                for i in range(gt_box.shape[0]):
+                        pt=gt_box[i]*300
+                        cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,0,255),
+                                      thickness=1
+                                      )
+
+
+                cv2.imshow('img',img)
+
+                cv2.waitKey(0)
+        # pickle.dump([s_1,s_2],s_pickle)
+        # s_pickle.close()
 
 
 

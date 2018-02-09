@@ -17,17 +17,17 @@ def softmax(a,index):
     return r
 
 
+import torchvision
+torchvision.models.inception_v3()
 
 
-a=torch.autograd.Variable(torch.FloatTensor())
+# save_dict=torch.load('/home/jason/PycharmProjects/CUMT_YOLO/Model/vgg16-397923af.pth')
+#
+# for key in save_dict:
+#     print(key)
 
-b=a>1
+print(torch.backends.cudnn.version())
 
-print(b,)
-
-
-# a=[[1,2,3],[1,2,3],[1,2,3]]
-# b=[1,1,1]
 # a=torch.autograd.Variable(torch.FloatTensor(a))
 # b=torch.autograd.Variable(torch.LongTensor(b))
 #

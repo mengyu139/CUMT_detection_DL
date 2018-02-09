@@ -9,7 +9,7 @@ import torchvision
 import torch.utils.data
 import torchvision.transforms
 import torch.nn.init
-
+import torch.nn.functional as F
 # torch.nn.init.xavier_normal()
 
 import math
@@ -77,6 +77,8 @@ def extract_features(input_features,best_boxs,index,extracted_features,img_size=
     box=best_boxs[0][index]
     valid=best_boxs[1][index]
 
+    out_size=extracted_features.size(2)
+
     if valid == 0:
         return
     else:
@@ -88,15 +90,20 @@ def extract_features(input_features,best_boxs,index,extracted_features,img_size=
         box=np.clip(box,a_max=img_size,a_min=0)
 
         box=box/1./step
+        box[0:2]=box[0:2]-1
+        box[2:4]=box[2:4]+1
+
         box=np.clip(box,a_min=0,a_max=ceil_num-1)
         box=np.floor(box)
         box=box.astype(np.int)# grid [0~19-1]
 
-        m=input_features[index][:,box[1]:box[3]+1,box[0]:box[2]+1]
-        m=torch.max(m,dim=1, keepdim=True)[0]
-        m=torch.max(m,dim=2, keepdim=True)[0]
+        m=torch.nn.functional.adaptive_max_pool2d(input_features[index:index+1,:,box[1]:box[3]+1,box[0]:box[2]+1],
+                                                  output_size=(out_size,out_size))
 
-        extracted_features[index,...]=m[...]
+        extracted_features[index]=m.squeeze(0)
+
+
+        # print('a extracted_features size: ',extracted_features[index,...].size())
 
 
 
@@ -122,30 +129,38 @@ class SSD_Net(nn.Module):
         self.priors =  torch.autograd.Variable(self.priorbox.forward(),requires_grad=False)
         self.size = 300
 
+        self.fg_max_pool_size=15
+
         self.fg_classes=fg_classes
 
 
+        # self.fg_conv=nn.Sequential(
+        #
+        #     nn.Conv2d(512, 512, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(512, 512, kernel_size=3, padding=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool2d(kernel_size=2,stride=2,padding=0),
+        #
+        # )
+
         self.fg_conv=nn.Sequential(
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2,stride=2,padding=0),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
+            InceptionD(512),
+            InceptionE(1024),
+            InceptionE(2048),
+            nn.AvgPool2d(kernel_size=7),
+            nn.Dropout(0.5)
         )
+
+
         self.fg_classifier=nn.Sequential(
-            nn.Linear(512, 4096),
-            nn.ReLU(True),
-            nn.Dropout(0.5),
-            nn.Linear(4096, 4096),
-            nn.ReLU(True),
-            nn.Dropout(0.5),
-            nn.Linear(4096, self.fg_classes),
+            # nn.Linear(2048, 4096),
+            # nn.ReLU(True),
+            # nn.Dropout(0.8),
+            # nn.Linear(4096, 4096),
+            # nn.ReLU(True),
+            # nn.Dropout(0.75),
+            nn.Linear(2048, self.fg_classes),
         )
         self._initialize_weights()
 
@@ -193,18 +208,22 @@ class SSD_Net(nn.Module):
         conf=conf.view(conf.size(0), -1, self.num_classes)
 
         # ----------FG---------------
-        FG_conv_feature=self.fg_conv(FG_conv_feature)
-        Extracted_features=torch.autograd.Variable(torch.zeros((loc.size(0),512,1,1))).cuda()
+        #
+        Extracted_features=torch.autograd.Variable(torch.zeros((loc.size(0),512,self.fg_max_pool_size,self.fg_max_pool_size))).cuda()
         best_prior=get_best_prior_box(loc,conf,self.priors)
 
         for index in range(loc.size(0)):
             extract_features(FG_conv_feature,best_prior,index=index,extracted_features=Extracted_features,img_size=300)
 
-        Extracted_features=Extracted_features.view(Extracted_features.size(0),-1)
+        FG_conv_feature=self.fg_conv(Extracted_features)
 
-        # print('extract_features size: ',Extracted_features.size())
+        # print('FG_conv_feature size: ',FG_conv_feature.size())
 
-        fg_cls=self.fg_classifier(Extracted_features)
+        FG_conv_feature=FG_conv_feature.view(FG_conv_feature.size(0),-1)
+
+        # print('FG_conv_feature size: ',FG_conv_feature.size())
+
+        fg_cls=self.fg_classifier(FG_conv_feature)
 
         # =========================
 
@@ -296,6 +315,72 @@ def make_loc_conf_layers(input_features_list,box_cfg,num_classes=1+1):
 
 
 
+class InceptionD(nn.Module):
+
+    def __init__(self, in_channels):
+        super(InceptionD, self).__init__()
+        self.branch3x3_1 = BasicConv2d(in_channels, 192, kernel_size=1)
+        self.branch3x3_2 = BasicConv2d(192, 320, kernel_size=3, stride=2)
+
+        self.branch7x7x3_1 = BasicConv2d(in_channels, 192, kernel_size=1)
+        self.branch7x7x3_2 = BasicConv2d(192, 192, kernel_size=(1, 7), padding=(0, 3))
+        self.branch7x7x3_3 = BasicConv2d(192, 192, kernel_size=(7, 1), padding=(3, 0))
+        self.branch7x7x3_4 = BasicConv2d(192, 192, kernel_size=3, stride=2)
+
+    def forward(self, x):
+        branch3x3 = self.branch3x3_1(x)
+        branch3x3 = self.branch3x3_2(branch3x3)
+
+        branch7x7x3 = self.branch7x7x3_1(x)
+        branch7x7x3 = self.branch7x7x3_2(branch7x7x3)
+        branch7x7x3 = self.branch7x7x3_3(branch7x7x3)
+        branch7x7x3 = self.branch7x7x3_4(branch7x7x3)
+
+        branch_pool = F.max_pool2d(x, kernel_size=3, stride=2)
+        outputs = [branch3x3, branch7x7x3,branch_pool]
+        return torch.cat(outputs, 1)
+
+
+class InceptionE(nn.Module):
+
+    def __init__(self, in_channels):
+        super(InceptionE, self).__init__()
+        self.branch1x1 = BasicConv2d(in_channels, 320, kernel_size=1)
+
+        self.branch3x3_1 = BasicConv2d(in_channels, 384, kernel_size=1)
+        self.branch3x3_2a = BasicConv2d(384, 384, kernel_size=(1, 3), padding=(0, 1))
+        self.branch3x3_2b = BasicConv2d(384, 384, kernel_size=(3, 1), padding=(1, 0))
+
+        self.branch3x3dbl_1 = BasicConv2d(in_channels, 448, kernel_size=1)
+        self.branch3x3dbl_2 = BasicConv2d(448, 384, kernel_size=3, padding=1)
+        self.branch3x3dbl_3a = BasicConv2d(384, 384, kernel_size=(1, 3), padding=(0, 1))
+        self.branch3x3dbl_3b = BasicConv2d(384, 384, kernel_size=(3, 1), padding=(1, 0))
+
+        self.branch_pool = BasicConv2d(in_channels, 192, kernel_size=1)
+
+    def forward(self, x):
+        branch1x1 = self.branch1x1(x)
+
+        branch3x3 = self.branch3x3_1(x)
+        branch3x3 = [
+            self.branch3x3_2a(branch3x3),
+            self.branch3x3_2b(branch3x3),
+        ]
+        branch3x3 = torch.cat(branch3x3, 1)
+
+        branch3x3dbl = self.branch3x3dbl_1(x)
+        branch3x3dbl = self.branch3x3dbl_2(branch3x3dbl)
+        branch3x3dbl = [
+            self.branch3x3dbl_3a(branch3x3dbl),
+            self.branch3x3dbl_3b(branch3x3dbl),
+        ]
+        branch3x3dbl = torch.cat(branch3x3dbl, 1)
+
+        branch_pool = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
+        branch_pool = self.branch_pool(branch_pool)
+
+        outputs = [branch1x1, branch3x3, branch3x3dbl, branch_pool]
+        return torch.cat(outputs, 1)
 
 
 box_cfg=[4,6,6,6,4,4]
@@ -311,6 +396,20 @@ extras_cfg = {
     '300': [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256],
     '512': [],
 }
+
+# --------------Inception----------------------------------------
+class BasicConv2d(nn.Module):
+
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super(BasicConv2d, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return F.relu(x, inplace=True)
+
 
 
 

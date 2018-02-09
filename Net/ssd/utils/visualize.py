@@ -74,7 +74,7 @@ def show(img,gts):
     cv2.waitKey(0)
 
 
-def  IOU(Reframe,GTframe):
+def IOU(Reframe,GTframe):
     """
     自定义函数，计算两矩形 IOU，传入为均为矩形对角线，（x,y）  坐标。·
     """
@@ -106,10 +106,81 @@ def  IOU(Reframe,GTframe):
     # return IOU
     return ratio
 
+# box  ndarray [n,5] [x1 y1 x2 y2 conf]
+def nms(box,threshold=0.5):
+    if box.shape[0] == 1:
+        return box
+    else:
+        sort_arg = np.argsort(box[:,4]) #按第'4'列排序
+        box = box[sort_arg]
+        box = np.flip(box,axis=0)
+
+        # 初步筛选
+        k1=0.4
+        sort_a = box[ box[:,4]>k1,... ]
+
+        if sort_a.shape[0]> 0:
+            #NMS
+            k2=threshold
+            pro_filter=[1]*sort_a.shape[0]
+
+            for i in range(sort_a.shape[0]):
+                if pro_filter[i] == 0:
+                    continue
+                else:
+                    for j in range(i+1,sort_a.shape[0]):
+                        intersect = IOU(sort_a[i,0:4],sort_a[j,0:4])
+
+                        if intersect > k2:
+                            pro_filter[j]=0
+
+            filtered_box = []
+            for i in range( sort_a.shape[0] ):
+                if pro_filter[i] is not 0:
+                    filtered_box.append(sort_a[i])
+
+            return np.array(filtered_box)
+
+        else:
+            return None
+
+# result ndarray [n,4]
+# gt ndarray [g,4]
+def eval_img(result,gt,threshold):
+    tp=0
+    fp=0
+    fn=0
+
+    if result is None:
+        tp=0
+        fp=0
+        fn=gt.shape[0]
+        recall=0
+        percision=0
+        # return tp,fp,fn
+    else:
+        result=result[0:4]
+        gt=gt[0:4]
+        for i in range(gt.shape[0]):
+            for j in range(result.shape[0]):
+                if IOU(gt[i],result[j])>=threshold:
+                    tp+=1
+                    break
+
+        percision=tp/1./result.shape[0]
+        recall=tp/1./gt.shape[0]
+
+    return recall,percision
+
+
 if __name__=="__main__":
-    a=[0.075,0.345,0.915,0.784]
-    b=[0.0847,0.335,0.922,0.776]
+    # a=[0.075,0.345,0.915,0.784]
+    # b=[0.0847,0.335,0.922,0.776]
+    #
+    # c=IOU(b,a)
+    #
+    # print(c)
+    a=np.array([[1,2,3,4,0],[0,1,2,3,2],[3,4,5,6,1],[4,5,6,7,4],[5,5,5,5,7]])
+    x=nms(a)
 
-    c=IOU(b,a)
-
-    print(c)
+    print(x)

@@ -194,15 +194,15 @@ def loss_for_one_img(priors,GT,out,threshold=0.5,k=3,is_cuda=False):
     loc_loss = torch.nn.functional.smooth_l1_loss(input=loc_out,target=loc_t,
                                                              size_average=False,reduce=False)
 
-    loc_loss = loc_loss * pos_mask.unsqueeze(1).expand_as(loc_out).float()
-    loc_loss = loc_loss.sum()
+    loc_loss = torch.sum(loc_loss * pos_mask.unsqueeze(1).expand_as(loc_out).float())
+    # loc_loss = loc_loss.sum()
 
     # conf loss = conf_postive  + conf_negtive
     # [8732]
     conf_cost=torch.nn.functional.cross_entropy(input=conf_out,target=conf_t,size_average=False,reduce=False)
 
-    conf_postive = conf_cost * pos_mask.float()
-    conf_postive = conf_postive.sum()
+    conf_postive = torch.sum(conf_cost * pos_mask.float())
+    # conf_postive = conf_postive.sum()
 
     conf_cost_neg = conf_cost[neg_mask]
     conf_cost_neg,_ = conf_cost_neg.sort(descending=True)
@@ -210,11 +210,10 @@ def loss_for_one_img(priors,GT,out,threshold=0.5,k=3,is_cuda=False):
     select_num = min( loc_t.size(0)-pos_num,k*pos_num )
 
     if select_num != 0:
-        conf_cost_neg=conf_cost_neg[0:select_num]
-        conf_negtive=conf_cost_neg.sum()
-
-        conf_loss = conf_postive + conf_negtive
-        conf_loss *= 1.
+        # conf_cost_neg=conf_cost_neg[0:select_num]
+        # conf_negtive=conf_cost_neg.sum()
+        conf_loss = (conf_postive + conf_cost_neg[0:select_num].sum())*1.0
+        # conf_loss *= 1.
     else:
         conf_loss=0
 
@@ -239,17 +238,6 @@ def loss_for_batch(priors,GTS,outputs,threshold=0.5,k=3,is_cuda=False):
         loss1,loss2=loss_for_one_img(priors,GT,[outputs[0][i],outputs[1][i]],threshold,k,is_cuda)
         Loss[i]=loss1+loss2
 
-    # =========FG loss===========================
-    # fg_label=[item[0][5] for item in GTS]
-    # fg_label=torch.autograd.Variable(torch.LongTensor(fg_label)).cuda()
-    #
-    # fg_loss=torch.nn.functional.cross_entropy(input=outputs[2],
-    #                                           target=fg_label,
-    #                                           reduce=False
-    #                                           )
-    # fg_loss=fg_loss*fg_mask.float().sum()/fg_mask.sum()
-    # =========FG loss===========================
-
 
     return Loss.mean()
 
@@ -259,7 +247,7 @@ def loss_for_fg(GTS,outputs,threshold=0.8):
     batch_num = outputs[3][1].__len__()
 
     mask1=torch.FloatTensor(outputs[3][1])
-    mask2=torch.zeros([batch_num])
+    mask2=torch.FloatTensor( np.zeros( [batch_num],dtype=np.float))
 
     for i in range(batch_num):
         gt=GTS[i][0][0:4]
@@ -276,30 +264,27 @@ def loss_for_fg(GTS,outputs,threshold=0.8):
             mask2[i]=1
 
     mask=mask1*mask2
-    mask=torch.autograd.Variable(mask).cuda()
+    # print('final valid mask: ',mask.numpy())
 
 
 #     ------------------------
 
     fg_label=[item[0][5] for item in GTS]
+    for i in range(batch_num):
+        if mask[i]<0.001:
+            fg_label[i]=200 # ignore index
+
     fg_label=torch.autograd.Variable(torch.LongTensor(fg_label)).cuda()
 
     # print( 'fg_loss input:',outputs[2].size(),'target: ',fg_label.size() )
 
+
     fg_loss=torch.nn.functional.cross_entropy(input=outputs[2],
                                       target=fg_label,
-                                      reduce=False
+                                      reduce=True,
+                                      size_average=True,ignore_index=200
                                       )
-    fg_loss=fg_loss*mask
-
-    # print('torch.sum(mask): ',torch.sum(mask))
-    if torch.sum(mask).cpu().data.numpy()[0] == 0:
-        fg_loss=torch.autograd.Variable(torch.FloatTensor([0])).cuda()
-    else:
-        fg_loss=fg_loss.sum()/mask.sum()
-
-    # print('fg_loss: ',fg_loss)
-
+    # print( 'fg_loss:',fg_loss.cpu().data.numpy() )
     return fg_loss
 
 

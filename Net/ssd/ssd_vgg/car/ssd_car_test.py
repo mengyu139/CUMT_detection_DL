@@ -34,7 +34,7 @@ if __name__ =="__main__":
 
     Use_cuda = True
     Use_vis = False
-    save_mode_name = 'ssd_cumt_car.pth'
+    save_mode_name = 'ssd_cumt_car_fg.pth'
 
     # =============Set up the net==========================================
     vgg_layers = make_vgg_layers(cfg['D'],batch_norm=False)
@@ -46,10 +46,13 @@ if __name__ =="__main__":
 
     # =============Load the parameters==========================================
     save_dict = torch.load( save_mode_name )
-    state_dict=ssd_net.state_dict()
-    for key in save_dict:
-        state_dict[key]=save_dict[key]
-    ssd_net.load_state_dict(state_dict)
+    ssd_net.load_state_dict(save_dict)
+
+    # save_dict = torch.load( save_mode_name )
+    # state_dict=ssd_net.state_dict()
+    # for key in save_dict:
+    #     state_dict[key]=save_dict[key]
+    # ssd_net.load_state_dict(state_dict)
 
     # save_dict=torch.load('/home/jason/PycharmProjects/CUMT_YOLO/Model/vgg16-397923af.pth')
     # state_dict=ssd_net.state_dict()
@@ -79,136 +82,80 @@ if __name__ =="__main__":
     data_loader={}
     data_loader["train"]=torch.utils.data.DataLoader(train_dataset,
                                                      batch_size=train_btach_size,
-                                                     shuffle=True,
-                                                     num_workers=8)
+                                                     shuffle=False,
+                                                     num_workers=1)
     # data_loader["test"]=torch.utils.data.DataLoader(test_dataset, batch_size=test_btach_size,shuffle=False, num_workers=8)
 
-    # =============Set the visdom==========================================
-    if Use_vis:
-        viz = Visdom()
-        # line updates
-        Vis_loss = viz.line(
-            X=np.array([0]),
-            Y=np.array([0]),
-             opts=dict(
-                    xlabel='step',
-                    ylabel='Loss',
-                    title='step SSD Training Loss',
-                    # legend=['Loc Loss', 'Conf Loss', 'Loss']
-                )
-        )
-        Vis_epoch_loss = viz.line(
-            X=np.array([0]),
-            Y=np.array([0]),
-             opts=dict(
-                    xlabel='epoch',
-                    ylabel='Loss',
-                    title='epoch SSD Training Loss',
-                    # legend=['Loc Loss', 'Conf Loss', 'Loss']
-                )
-        )
-        dis_cnt=0
+
      # =============Start the train==========================================
     if Use_cuda:
         ssd_net.cuda()
     else:
         ssd_net.cpu()
 
-    for epoch in range(1000):
 
-        ssd_net.eval()
+    ssd_net.eval()
 
-        COST=0
-        COST_CNT=0
+    cnt=0
+    correct_cnt=0
+    for item in data_loader['train']:
 
-        for item in data_loader['train']:
-            # dis_cnt+=1
-            COST_CNT+=1
+        imgs,indexs,img_names,flips = item
+        GTS=train_dataset.get_GT_boxs(indexs.numpy(),flips.numpy())
+        GTS=train_dataset.get_SSD_GTS(GTS)
 
-            imgs,indexs,img_names,flips = item
-            GTS=train_dataset.get_GT_boxs(indexs.numpy(),flips.numpy())
-            GTS=train_dataset.get_SSD_GTS(GTS)
+        # print(imgs.size())
+        # img = get_img(imgs.numpy()[0])
+        # show(img,gts=GTS[0])
+        #
+        # cv2.waitKey(0)
 
-            # print(imgs.size())
-            # img = get_img(imgs.numpy()[0])
-            # show(img,gts=GTS[0])
-            #
-            # cv2.waitKey(0)
+        if Use_cuda:
+            train_x = torch.autograd.Variable(imgs,volatile=True).cuda()
+        else:
+            train_x = torch.autograd.Variable(imgs,volatile=True)
 
+        outputs = ssd_net(train_x)
 
-            if Use_cuda:
-                train_x = torch.autograd.Variable(imgs,volatile=True).cuda()
-            else:
-                train_x = torch.autograd.Variable(imgs,volatile=True)
-
-            outputs = ssd_net(train_x)
-
-            # # [x1 y1 x2 y2] tensor  [8732,4] -> ndarray
-            # loc_boxs=Loss.decode(outputs[0][0].cpu().data, priors=ssd_net.priors.data, variances=[0.1, 0.2])
-            # loc_boxs=loc_boxs.numpy()
-            #
-            # conf_result = outputs[1][0]
-            # conf_result = torch.nn.functional.softmax(conf_result,dim=1)
-            # conf_result = conf_result.data.cpu().numpy()
-            #
-            # print(loc_boxs.shape,conf_result.shape)
-            #
-            # index = np.argmax(conf_result,axis=1)
-            #
-            # car_index = index==1
-            #
-            # print('origin loc_boxs,conf_result size: ',loc_boxs.shape,conf_result.shape)
-            #
-            # print('choosed num: ',car_index.sum())
-            #
-            # loc_boxs=loc_boxs[car_index]
-            # conf_result=conf_result[car_index]
-            #
-            # print('choosed loc_boxs,conf_result size: ',loc_boxs.shape,conf_result.shape)
-            #
-            # print(conf_result)
-            #
-            # max_index=np.argmax(conf_result[:,1])
-
-            img = get_img(imgs.numpy()[0])
-            pt=outputs[3][0][0]*300
-            # pt=loc_boxs[max_index]*300
-
-            print( outputs[3][1]  )
+        img = get_img(imgs.numpy()[0])
+        pt=outputs[3][0][0]*300
+        # pt=loc_boxs[max_index]*300
 
 
-            cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
-                          thickness=2
-            )
-            gt=GTS[0][0][0:4]
-            gt_box=np.array([0,0,0,0],dtype=np.float)
-            gt_box[0]=gt[0]-0.5*gt[2]
-            gt_box[1]=gt[1]-0.5*gt[3]
-            gt_box[2]=gt[0]+0.5*gt[2]
-            gt_box[3]=gt[1]+0.5*gt[3]
+        cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
+                      thickness=2
+        )
 
-            print(IOU( outputs[3][0][0], gt_box))
+        gt=GTS[0][0][0:4]
+        gt_box=np.array([0,0,0,0],dtype=np.float)
+        gt_box[0]=gt[0]-0.5*gt[2]
+        gt_box[1]=gt[1]-0.5*gt[3]
+        gt_box[2]=gt[0]+0.5*gt[2]
+        gt_box[3]=gt[1]+0.5*gt[3]
 
+        print('iou:',IOU( outputs[3][0][0], gt_box))
 
-            pt = gt_box * 300
-            cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(255,0,0),
-                          thickness=2
-            )
+        fg_pred=outputs[2][0].cpu().data.numpy()
+        fg_cls=np.argmax(fg_pred)
+        print('real label:',GTS[0][0][5],' predict cls: ',fg_cls)
 
-            # for i in range(loc_boxs.shape[0]):
-            #     pt=loc_boxs[i]*300
-            #     cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
-            #                   thickness=2
-            #                   )
+        cnt+=1
+        if GTS[0][0][5] == fg_cls:
+            correct_cnt+=1
 
 
+        pt = gt_box * 300
+        cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(255,0,0),
+                      thickness=2
+        )
 
-            cv2.imshow('img',img)
-            cv2.waitKey(0)
+        # for i in range(loc_boxs.shape[0]):
+        #     pt=loc_boxs[i]*300
+        #     cv2.rectangle(img,pt1=( int(pt[0]),int(pt[1]) ),pt2=( int(pt[2]),int(pt[3]) ),color=(0,255,0),
+        #                   thickness=2
+        #                   )
 
-        print('\nloss for one epoch :',COST/1./COST_CNT)
+        cv2.imshow('img',img)
+        cv2.waitKey(0)
 
-        if Use_vis:
-            viz.line(
-                X=np.array([epoch]),
-                Y=np.array( [COST] ), win=Vis_epoch_loss, update='append')
+    print('cnt: ',cnt,' correct_cnt: ',correct_cnt,' accuracy: ',correct_cnt/1./cnt*100,"%")

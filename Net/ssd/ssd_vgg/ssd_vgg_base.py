@@ -35,8 +35,6 @@ class SSD_Net(nn.Module):
 
         self.extras = nn.ModuleList(extras)
 
-        self.L2Norm = L2Norm(512, 20)
-
         self.loc = nn.ModuleList(head[0])
         self.conf = nn.ModuleList(head[1])
 

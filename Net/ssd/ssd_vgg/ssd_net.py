@@ -58,13 +58,15 @@ if __name__ =="__main__":
     # ssd_net.load_state_dict(state_dict)
 
     # =============Set the optimizer==========================================
-    k=0.0002
+    k=0.0001
     optimizer = torch.optim.SGD ([
         # {'params':train_para ,'lr':0.001},
         {'params':ssd_net.vgg.parameters(),'lr':k},
         {'params':ssd_net.extras.parameters(),'lr':k},
         {'params':ssd_net.loc.parameters(),'lr':k},
         {'params':ssd_net.conf.parameters(),'lr':k},
+        {'params':ssd_net.L2Norm.parameters(),'lr':k},
+
     ],weight_decay=0.0,momentum=0.9)
 
     # =============Set the data loader==========================================
@@ -122,28 +124,6 @@ if __name__ =="__main__":
         if GPU_TEM > 80:
             print ('GPU OVER HEATED,QUIT!!!')
             break
-
-        if epoch < 100:
-            k=0.0002
-            optimizer = torch.optim.SGD ([
-                # {'params':train_para ,'lr':0.001},
-                {'params':ssd_net.vgg.parameters(),'lr':k},
-                {'params':ssd_net.extras.parameters(),'lr':k},
-                {'params':ssd_net.loc.parameters(),'lr':k},
-                {'params':ssd_net.conf.parameters(),'lr':k},
-            ],weight_decay=0.0,momentum=0.9)
-
-        else:
-            k=0.0001
-            optimizer = torch.optim.SGD ([
-                # {'params':train_para ,'lr':0.001},
-                {'params':ssd_net.vgg.parameters(),'lr':k},
-                {'params':ssd_net.extras.parameters(),'lr':k},
-                {'params':ssd_net.loc.parameters(),'lr':k},
-                {'params':ssd_net.conf.parameters(),'lr':k},
-            ],weight_decay=0.0,momentum=0.9)
-
-
 
         ssd_net.train()
 
